@@ -1,0 +1,31 @@
+name = "airmate"
+main = "worker/index.js"
+compatibility_date = "2026-11-18"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# Primary AI provider: Cloudflare Workers AI (free tier, no external key).
+# Enable by uncommenting; deploy then serves /api/ai from this account's
+# free Workers AI allowance.
+# [ai]
+# binding = "AI"
+
+# Alternative provider: Gemini API free tier.
+# Set with: npx wrangler secret put GEMINI_API_KEY
+# (never commit the key to this repo)
+
+# Public AI runtime allowance (approved Nov 19, 2026): 200 total public AI
+# calls across all endpoints/retries, valid through 2026-12-13 23:59 IST.
+# The counter lives in D1 so it is atomic and persistent across instances
+# and restarts. Changing cap/expiry requires a redeploy = re-review.
+[[d1_databases]]
+binding = "DB"
+database_name = "airmate-allowance"
+database_id = "859419e5-1874-4cce-8dba-d56de5076921"
+migrations_dir = "migrations"
+
+[vars]
+ALLOWANCE_CAP = "200"
+ALLOWANCE_UNTIL = "2026-12-13T23:59:59+05:30"
