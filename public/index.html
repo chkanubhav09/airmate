@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AirMate - Urban Air Quality Assistant</title>
+<meta name="description" content="A GenAI-powered assistant that helps families and communities navigate winter smog and urban air pollution.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="%23000"/><path d="M8 13h11a3 3 0 1 0-3-3M8 19h15a3 3 0 1 1-3 3M8 16h7" stroke="%2322d3ee" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>'>
+</head>
+<body>
+
+<header>
+  <div class="logo" id="logo">
+    <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#34d399"/>
+      </linearGradient></defs>
+      <circle cx="16" cy="16" r="15" fill="none" stroke="url(#lg)" stroke-width="1.6"/>
+      <path d="M8 13h11a3 3 0 1 0-3-3M8 19h15a3 3 0 1 1-3 3M8 16h7" stroke="url(#lg)" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    </svg>
+    <span class="word">AirMate</span>
+    <span class="tagline">Urban Air Quality Assistant</span>
+  </div>
+  <nav aria-label="Sections">
+    <a href="#dashboard">Air now</a>
+    <a href="#assistant">Assistant</a>
+    <a href="#routine">My day</a>
+    <a href="#indoor">Indoor air</a>
+    <a href="#about" id="about-open">About</a>
+  </nav>
+</header>
+
+<main>
+  <!-- HERO -->
+  <section id="hero" aria-label="Introduction">
+    <h1>Navigate winter smog with a plan, not a guess.</h1>
+    <p class="lede">
+      AirMate watches the air quality forecast for your area and its GenAI assistant turns it into
+      low-emission daily routines, indoor air hacks, and sustainable alternatives - each one
+      explaining the direct impact of your choice.
+    </p>
+    <div class="locbar">
+      <div class="search-wrap">
+        <label for="city-search" class="hidden">Search your city</label>
+        <input id="city-search" type="text" placeholder="Search your city or area…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="search-results">
+        <div class="search-results" id="search-results" role="listbox" aria-label="City results"></div>
+      </div>
+      <button class="btn ghost" id="geo-btn" type="button">Use my location</button>
+    </div>
+  </section>
+
+  <!-- DASHBOARD -->
+  <section class="card" id="dashboard" aria-label="Air quality now">
+    <div class="section-head">
+      <h2>Air right now</h2>
+      <span class="sub" id="updated-line">loading…</span>
+    </div>
+    <div class="place-line">Showing model forecast for <strong id="place-name">Pune, Maharashtra</strong>
+      <span class="note" style="display:inline">(US AQI, CAMS model estimate - not a ground-station reading)</span>
+    </div>
+    <div class="aqi-hero">
+      <div class="aqi-dial" id="aqi-dial" role="img" aria-label="Current US AQI">
+        <div><div class="num" id="aqi-num">–</div><div class="lbl">US AQI</div></div>
+      </div>
+      <div>
+        <div class="aqi-badges">
+          <span class="aqi-band" id="aqi-band">–</span>
+          <span class="aqi-trend" id="aqi-trend" style="display:none"></span>
+        </div>
+        <p class="aqi-summary" id="aqi-advice" style="margin-top:10px">Loading the latest forecast…</p>
+      </div>
+    </div>
+    <div class="dash-grid">
+      <div class="metric"><div class="k">PM2.5</div><div class="v" id="m-pm25">–</div><div class="u">µg/m³</div></div>
+      <div class="metric"><div class="k">PM10</div><div class="v" id="m-pm10">–</div><div class="u">µg/m³</div></div>
+      <div class="metric"><div class="k">NO₂</div><div class="v" id="m-no2">–</div><div class="u">µg/m³</div></div>
+      <div class="metric"><div class="k">Ozone</div><div class="v" id="m-o3">–</div><div class="u">µg/m³</div></div>
+      <div class="metric"><div class="k">CO</div><div class="v" id="m-co">–</div><div class="u">µg/m³</div></div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="aqi-chart" role="img" aria-label="Hourly US AQI forecast for the next 48 hours"></canvas>
+      <div class="chart-legend">
+        <span><i style="background:#34d399"></i>Good (0–50)</span>
+        <span><i style="background:#facc15"></i>Moderate (51–100)</span>
+        <span><i style="background:#fb923c"></i>Sensitive (101–150)</span>
+        <span><i style="background:#f87171"></i>Unhealthy (151+)</span>
+      </div>
+    </div>
+    <div class="window-chips" id="window-chips" aria-label="Best outdoor windows"></div>
+  </section>
+
+  <!-- ASSISTANT -->
+  <section class="card" id="assistant" aria-label="GenAI assistant">
+    <div class="section-head">
+      <h2>Ask the assistant</h2>
+      <span class="sub">GenAI, grounded in your live air context</span>
+    </div>
+    <div class="ai-offline hidden" id="ai-banner" role="status">The GenAI backend is not connected in this preview, so the assistant cannot reply yet. The live air data above is unaffected.</div>
+    <div id="chat-log" aria-live="polite"></div>
+    <div class="chat-suggestions" id="chat-suggestions"></div>
+    <div class="chat-input-row">
+      <label for="chat-input" class="hidden">Message the assistant</label>
+      <input id="chat-input" type="text" placeholder="e.g. When should I take my kids to the park today?" maxlength="500">
+      <button class="btn" id="chat-send" type="button">Send</button>
+    </div>
+    <p class="note" id="ai-status"></p>
+    <p class="note">AI answers use Google Gemini (free tier). Text you type here is sent to Google and may be used to improve its products, so please don't enter personal details.</p>
+  </section>
+
+  <!-- ROUTINE -->
+  <section class="card" id="routine" aria-label="Low emission routine planner">
+    <div class="section-head">
+      <h2>My low-emission day</h2>
+      <span class="sub">Describe your routine, get cleaner swaps with the impact spelled out</span>
+    </div>
+    <div class="form-grid">
+      <div class="field">
+        <label for="r-commute">Main commute mode</label>
+        <select id="r-commute">
+          <option value="car_petrol">Petrol car</option>
+          <option value="car_diesel">Diesel car</option>
+          <option value="motorbike" selected>Motorbike / scooter</option>
+          <option value="auto_rickshaw">Auto-rickshaw</option>
+          <option value="bus">Bus</option>
+          <option value="metro">Metro</option>
+          <option value="cycle">Bicycle</option>
+          <option value="walk">Walking</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="r-km">One-way distance (km)</label>
+        <input id="r-km" type="number" min="0" max="200" value="8" inputmode="decimal">
+      </div>
+      <div class="field">
+        <label for="r-days">Commute days per week</label>
+        <input id="r-days" type="number" min="0" max="7" value="5" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label for="r-exercise">Outdoor exercise habit</label>
+        <select id="r-exercise">
+          <option value="morning walk">Morning walk</option>
+          <option value="running">Running</option>
+          <option value="cycling">Cycling</option>
+          <option value="outdoor sports">Outdoor sports</option>
+          <option value="none">None</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="r-family">Who's in the household?</label>
+        <select id="r-family">
+          <option value="adults only">Adults only</option>
+          <option value="young children">Young children</option>
+          <option value="elderly family members">Elderly family members</option>
+          <option value="children and elderly">Children and elderly</option>
+          <option value="someone with asthma">Someone with asthma</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="r-errands">Weekly errands by vehicle (km)</label>
+        <input id="r-errands" type="number" min="0" max="300" value="12" inputmode="decimal">
+      </div>
+    </div>
+    <div class="ai-offline hidden" id="routine-banner" role="status">AI-generated swap suggestions go live once the backend is connected. The commute CO&#8322; math below still works.</div>
+    <button class="btn" id="routine-go" type="button">Suggest cleaner swaps</button>
+    <div class="suggestions" id="routine-out"></div>
+    <p class="note">CO₂ figures are rough estimates from published average emission factors (see About). Air guidance follows US EPA AQI health bands.</p>
+    <p class="note">Suggestions use Google Gemini (free tier). The routine you enter is sent to Google and may be used to improve its products, so please don't enter personal details.</p>
+  </section>
+
+  <!-- INDOOR -->
+  <section class="card" id="indoor" aria-label="Indoor air quality hacks">
+    <div class="section-head">
+      <h2>Indoor air hacks</h2>
+      <span class="sub">Tailored to your home and today's smog level</span>
+    </div>
+    <div class="form-grid">
+      <div class="field">
+        <label for="h-floor">Floor level</label>
+        <select id="h-floor">
+          <option value="ground floor">Ground floor</option>
+          <option value="1st-3rd floor" selected>1st–3rd floor</option>
+          <option value="4th floor or higher">4th floor or higher</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="h-road">Windows face a busy road?</label>
+        <select id="h-road">
+          <option value="yes">Yes</option>
+          <option value="no" selected>No</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="h-purifier">Air purifier at home?</label>
+        <select id="h-purifier">
+          <option value="no" selected>No</option>
+          <option value="yes">Yes</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="h-cooking">Main cooking fuel</label>
+        <select id="h-cooking">
+          <option value="LPG gas" selected>LPG gas</option>
+          <option value="induction / electric">Induction / electric</option>
+          <option value="wood or biomass">Wood or biomass</option>
+        </select>
+      </div>
+    </div>
+    <div class="ai-offline hidden" id="indoor-banner" role="status">AI-generated indoor hacks go live once the backend is connected.</div>
+    <button class="btn" id="indoor-go" type="button">Generate my hacks</button>
+    <div class="suggestions" id="indoor-out"></div>
+    <p class="note">Hacks use Google Gemini (free tier). The home details you enter are sent to Google and may be used to improve its products, so please don't enter personal details.</p>
+  </section>
+</main>
+
+<!-- ABOUT -->
+<div class="modal-backdrop hidden" id="about-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="about-title" id="about">
+    <h3 id="about-title">About AirMate</h3>
+    <p>AirMate is a GenAI-powered Urban Air Quality Assistant built for the PromptWars Virtual
+    Challenge 06. It helps families and communities navigate severe winter smog and urban air
+    pollution with low-emission daily routines, indoor air quality hacks, and sustainable
+    alternatives - each explained with its direct impact.</p>
+
+    <h4>Data &amp; honesty</h4>
+    <ul>
+      <li>Air quality figures are <strong>model forecasts</strong> from the Copernicus CAMS global
+      atmospheric composition model (~45 km resolution, updated twice daily), served by
+      <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> under
+      <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.
+      They are estimates for your area, <strong>not readings from a ground sensor near you</strong>.
+      For official Indian station readings, check CPCB's Sameer app.</li>
+      <li>AQI uses the <strong>US EPA AirNow</strong> scale and its health guidance bands
+      (airnow.gov). India's national AQI bands differ slightly.</li>
+      <li>CO₂ impact figures are order-of-magnitude estimates from rounded
+      <strong>UK Government GHG Conversion Factors 2026</strong> averages. They compare choices;
+      they are not measurements of your vehicle.</li>
+      <li>Health tips are general public guidance, not medical advice. Sensitive groups should
+      follow their doctor's plan.</li>
+    </ul>
+
+    <h4>How the AI is used</h4>
+    <p>The assistant chat, routine swaps, and indoor hacks are generated by a large language
+    model through a small backend proxy. Your live air-quality context is sent with each request
+    so answers stay grounded in today's conditions. No personal data is stored.</p>
+
+    <h4>Built with</h4>
+    <p>AI-assisted development ("vibe coding") for PromptWars Virtual - free-tier tools only.</p>
+    <div class="close-row"><button class="btn ghost" id="about-close" type="button">Close</button></div>
+  </div>
+</div>
+
+<canvas id="egg-canvas" aria-hidden="true"></canvas>
+
+<footer>
+  Air quality data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>
+  · CAMS / Copernicus · AQI bands: US EPA AirNow · AirMate is a hackathon build, free for everyone.
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
