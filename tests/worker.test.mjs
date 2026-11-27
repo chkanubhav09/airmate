@@ -201,3 +201,52 @@ test('oversized bodies are rejected before parsing', async () => {
   const res = await worker.fetch(big, env);
   assert.equal(res.status, 413);
 });
+
+test('oversized bodies without a content-length header are still rejected', async () => {
+  stubFetch(() => { throw new Error('fetch should not be called'); });
+  const bigBody = JSON.stringify({ ...chatBody, pad: 'x'.repeat(20000) });
+  const req = new Request('https://local.test/api/ai', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: new Blob([bigBody]).stream(),
+    duplex: 'half',
+  });
+  const res = await worker.fetch(req, env);
+  assert.equal(res.status, 413);
+});
+
+test('non-JSON content type returns 415', async () => {
+  stubFetch(() => { throw new Error('fetch should not be called'); });
+  const req = new Request('https://local.test/api/ai', { method: 'POST', body: '{}' });
+  const res = await worker.fetch(req, env);
+  assert.equal(res.status, 415);
+});
+
+test('malformed JSON bodies return 400 invalid_json', async () => {
+  stubFetch(() => { throw new Error('fetch should not be called'); });
+  const req = new Request('https://local.test/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{nope' });
+  const res = await worker.fetch(req, env);
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error, 'invalid_json');
+});
+
+test('unsupported methods on /api/ai return 405', async () => {
+  const res = await worker.fetch(new Request('https://local.test/api/ai', { method: 'DELETE' }), env);
+  assert.equal(res.status, 405);
+});
+
+test('oversized streamed body is cancelled early instead of fully buffered', async () => {
+  stubFetch(() => { throw new Error('fetch should not be called'); });
+  let pulled = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      pulled += 1;
+      controller.enqueue(new Uint8Array(8192));
+      if (pulled > 1000) controller.close();
+    },
+  });
+  const req = new Request('https://local.test/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: stream, duplex: 'half' });
+  const res = await worker.fetch(req, env);
+  assert.equal(res.status, 413);
+  assert.ok(pulled < 20, `read ${pulled} chunks; expected an early stop`);
+});
