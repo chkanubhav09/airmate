@@ -1,5 +1,6 @@
 // AirMate frontend logic.
-import { AQI_BANDS, aqiBand, aqiTrend, findPastAqi, AQI_TREND_LABELS, bestWindows, EMISSION_FACTORS, MODE_LABELS, weeklyCo2Kg, switchSavingKg, mdLite } from './lib/aqi.js';
+import { AQI_BANDS, aqiBand, aqiTrend, AQI_TREND_LABELS, bestWindows, EMISSION_FACTORS, MODE_LABELS, weeklyCo2Kg, switchSavingKg, mdLite } from './lib/aqi.js';
+import { airUrl, parseAirResponse } from './lib/air.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -13,23 +14,9 @@ const state = {
 
 async function fetchAir() {
   const { lat, lon } = state.place;
-  const url = 'https://air-quality-api.open-meteo.com/v1/air-quality'
-    + `?latitude=${lat}&longitude=${lon}`
-    + '&current=us_aqi,pm2_5,pm10,nitrogen_dioxide,ozone,carbon_monoxide'
-    + '&hourly=us_aqi,pm2_5&past_days=1&forecast_days=3&timezone=auto';
-  const res = await fetch(url);
+  const res = await fetch(airUrl(lat, lon));
   if (!res.ok) throw new Error('air api ' + res.status);
-  const j = await res.json();
-  const hours = [];
-  const now = Date.now();
-  for (let i = 0; i < j.hourly.time.length; i++) {
-    const t = new Date(j.hourly.time[i]);
-    if (t.getTime() < now - 3600e3) continue;
-    if (hours.length >= 48) break;
-    hours.push({ time: t, aqi: j.hourly.us_aqi[i], pm25: j.hourly.pm2_5[i] });
-  }
-  const sixHoursAgoAqi = findPastAqi(j.hourly, j.current?.time || now, 6);
-  state.air = { current: j.current, hours, sixHoursAgoAqi };
+  state.air = parseAirResponse(await res.json());
   renderDashboard();
 }
 
