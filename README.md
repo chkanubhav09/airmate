@@ -44,6 +44,17 @@ location and lifestyle - and every suggestion **explains the direct impact** of 
   1. **Cloudflare Workers AI** - uncomment `[ai]` in `wrangler.toml`.
   2. **Gemini API (free tier)** - `npx wrangler secret put GEMINI_API_KEY`.
 
+## Project layout
+
+```
+public/            static app (index.html, styles.css, app.js UI wiring)
+public/lib/aqi.js  pure AQI bands, trend, windows, emission maths
+public/lib/air.js  Open-Meteo URL + response parsing
+worker/index.js    request routing and validation for /api/ai
+worker/lib/        prompts, allowance counter (D1), providers, JSON helpers
+tests/             node:test suites (pure logic and mocked worker)
+```
+
 ## Run locally
 
 ```bash
@@ -55,8 +66,11 @@ npx serve public          # AI features show an honest "backend offline" state
 ## Test
 
 ```bash
-node --test tests/*.test.mjs
+npm test          # unit + mocked worker tests (no network, no AI calls)
+npm run check     # syntax check of every JS file
 ```
+
+CI (`.github/workflows/ci.yml`) runs both on every push.
 
 ## Deploy
 
