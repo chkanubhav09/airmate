@@ -1,15 +1,29 @@
-// AirMate backend (Cloudflare Worker).
-// Serves the static app and proxies /api/ai so no AI key reaches the browser.
+// AirMate backend proxy (Cloudflare Worker).
 // Keeps AI keys server-side, injects live air context, enforces strict JSON
-// for structured modes. No personal data is stored: every request is stateless.
-// Logic lives in ./lib: prompts, allowance (D1 call budget), providers, json.
+// for structured modes. No personal data is stored — every request is stateless.
 
-import { systemPrompt, ROUTINE_PROMPT, INDOOR_PROMPT } from './lib/prompts.js';
-import { ALLOWANCE_COPY } from './lib/allowance.js';
-import { runModel } from './lib/providers.js';
-import { extractJson, safeJson, json } from './lib/json.js';
+const SYSTEM_BASE = `You are AirMate, an Urban Air Quality Assistant for Indian families and communities facing winter smog.
+Your job: suggest low-emission daily routines, indoor air quality hacks, and sustainable alternatives tailored to the user's location and lifestyle, and ALWAYS explain the direct impact of each suggestion in plain words.
+Rules:
+- Ground every answer in the live air context provided (place, US AQI, PM2.5, PM10).
+- The AQI shown is a CAMS model estimate, not a ground-station reading. Say so when it matters.
+- Follow US EPA AQI health-band guidance for activity advice. Never diagnose or give medical advice; suggest consulting a doctor for health conditions.
+- Never invent precise health statistics or emission numbers. Rough, clearly-hedged estimates are fine.
+- Keep answers concise: short paragraphs and bullet lists. Use **bold** for key actions.`;
 
-const MAX_BODY_BYTES = 16384;
+function systemPrompt(ctx) {
+  return SYSTEM_BASE + `\n\nLive air context (CAMS model estimate via Open-Meteo): place=${ctx.place || 'unknown'}, US AQI=${ctx.us_aqi ?? 'unknown'} (${ctx.band || 'unknown'}), PM2.5=${round1(ctx.pm25)} µg/m³, PM10=${round1(ctx.pm10)} µg/m³, updated=${ctx.updated || 'unknown'}.`;
+}
+
+const round1 = (v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : 'unknown');
+
+const ROUTINE_PROMPT = `The user shared their daily routine. Suggest 3-4 cleaner swaps (low-emission routines, timing changes using the AQI forecast context, sustainable alternatives).
+Respond with ONLY valid JSON, no markdown fences:
+{"suggestions":[{"title":"short title","detail":"1-2 sentence explanation","impact":"one short quantified or hedged impact statement, e.g. '≈2 kg CO2/week avoided' or 'cuts your peak-hour PM2.5 exposure'"}]}`;
+
+const INDOOR_PROMPT = `The user described their home. Suggest 3-5 indoor air quality hacks matched to their home and the current smog level.
+Respond with ONLY valid JSON, no markdown fences:
+{"hacks":[{"title":"short title","detail":"1-2 sentence explanation","impact":"one short direct-impact statement"}]}`;
 
 export default {
   async fetch(request, env) {
@@ -39,41 +53,12 @@ export default {
   },
 };
 
-// Returns the body as text, or null if it is larger than maxBytes.
-async function readBodyCapped(request, maxBytes) {
-  if (!request.body) return '';
-  const reader = request.body.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const all = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) { all.set(c, off); off += c.byteLength; }
-  return new TextDecoder().decode(all);
-}
-
 async function handleAI(request, env) {
-  if (!(request.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
-    return json({ error: 'unsupported_media_type' }, 415);
-  }
   const len = parseInt(request.headers.get('content-length') || '0', 10);
-  if (len > MAX_BODY_BYTES) return json({ error: 'payload_too_large' }, 413);
-  // The header can be absent or wrong (chunked uploads): read the stream with a
-  // hard byte cap and stop as soon as it is exceeded, so memory stays bounded.
-  const raw = await readBodyCapped(request, MAX_BODY_BYTES);
-  if (raw === null) return json({ error: 'payload_too_large' }, 413);
+  if (len > 16384) return json({ error: 'payload_too_large' }, 413);
   let body;
   try {
-    body = JSON.parse(raw);
+    body = await request.json();
   } catch {
     return json({ error: 'invalid_json' }, 400);
   }
@@ -110,3 +95,107 @@ async function handleAI(request, env) {
     return json({ error: 'model_failed' }, 502);
   }
 }
+
+// Public runtime allowance: every model attempt (any provider, any mode,
+// every retry/fallback) reserves one unit from a D1-backed counter BEFORE the
+// call. The conditional UPDATE ... RETURNING is atomic in D1, persists across
+// isolates and restarts, and refuses at the cap. Failed calls still consume
+// their unit, so the cap bounds total provider calls, not just successes.
+// Without a DB binding plus ALLOWANCE_CAP and ALLOWANCE_UNTIL, the model
+// refuses to run: no silent unbudgeted usage.
+const ALLOWANCE_COPY = {
+  EXHAUSTED: 'The public AI allowance for this deployment is used up.',
+  EXPIRED: 'The public AI allowance period for this deployment has ended.',
+  NOT_CONFIGURED: 'The AI allowance is not configured on this deployment.',
+};
+
+async function reserveAllowance(env) {
+  const cap = parseInt(env.ALLOWANCE_CAP || '', 10);
+  if (!cap || !env.DB) throw new Error('ALLOWANCE_NOT_CONFIGURED');
+  const until = Date.parse(env.ALLOWANCE_UNTIL || '');
+  if (!until || Date.now() > until) throw new Error('ALLOWANCE_EXPIRED');
+  const row = await env.DB
+    .prepare('UPDATE allowance SET used = used + 1 WHERE id = 1 AND used < ? RETURNING used')
+    .bind(cap)
+    .first();
+  if (!row) throw new Error('ALLOWANCE_EXHAUSTED');
+}
+
+// Provider chain: Workers AI binding -> Gemini REST (secret) -> 501.
+async function runModel(env, system, user) {
+  if (env.AI) {
+    await reserveAllowance(env);
+    try {
+      const r = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        max_tokens: 700,
+      });
+      if (r?.response) return r.response;
+    } catch { /* fall through; each attempt reserves its own unit */ }
+    await reserveAllowance(env);
+    const r2 = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      max_tokens: 700,
+    });
+    if (r2?.response) return r2.response;
+    throw new Error('MODEL_EMPTY');
+  }
+
+  if (env.GEMINI_API_KEY) {
+    await reserveAllowance(env);
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: user }] }],
+          generationConfig: { maxOutputTokens: 700, temperature: 0.6 },
+        }),
+      }
+    );
+    if (!res.ok) throw new Error('GEMINI_' + res.status);
+    const j = await res.json();
+    const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+    if (text) return text;
+    throw new Error('MODEL_EMPTY');
+  }
+
+  throw new Error('NO_PROVIDER');
+}
+
+// Pull the first {...} block out of a model reply, tolerating chatter/fences.
+function extractJson(text) {
+  const m = String(text).match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try {
+    const j = JSON.parse(m[0]);
+    const list = j.suggestions || j.hacks;
+    if (!Array.isArray(list)) return null;
+    const clean = list
+      .filter((s) => s && typeof s.title === 'string' && typeof s.detail === 'string')
+      .slice(0, 6)
+      .map((s) => ({
+        title: s.title.slice(0, 120),
+        detail: s.detail.slice(0, 600),
+        impact: typeof s.impact === 'string' ? s.impact.slice(0, 160) : null,
+      }));
+    return j.suggestions ? { suggestions: clean } : { hacks: clean };
+  } catch {
+    return null;
+  }
+}
+
+const safeJson = (v) => JSON.stringify(v ?? {}).slice(0, 2000);
+const json = (obj, status = 200) =>
+  new Response(JSON.stringify(obj), {
+    status,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  });
