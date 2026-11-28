@@ -201,3 +201,11 @@ test('oversized bodies are rejected before parsing', async () => {
   const res = await worker.fetch(big, env);
   assert.equal(res.status, 413);
 });
+
+test('Gemini request disables thinking and leaves room for JSON replies', async () => {
+  stubFetch(() => geminiOk('ok'));
+  await worker.fetch(aiRequest(chatBody), env);
+  const sent = JSON.parse(calls[0].init.body);
+  assert.equal(sent.generationConfig.thinkingConfig.thinkingBudget, 0);
+  assert.ok(sent.generationConfig.maxOutputTokens >= 1024);
+});
