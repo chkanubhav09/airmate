@@ -11,15 +11,27 @@ const state = {
 
 /* ---------------- air data ---------------- */
 
+let airAbort = null;
+
 async function fetchAir() {
   const { lat, lon } = state.place;
+  // A newer request (city change, location button) cancels the one in flight.
+  if (airAbort) airAbort.abort();
+  const ctl = airAbort = new AbortController();
   const url = 'https://air-quality-api.open-meteo.com/v1/air-quality'
     + `?latitude=${lat}&longitude=${lon}`
     + '&current=us_aqi,pm2_5,pm10,nitrogen_dioxide,ozone,carbon_monoxide'
     + '&hourly=us_aqi,pm2_5&past_days=1&forecast_days=3&timezone=auto';
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('air api ' + res.status);
-  const j = await res.json();
+  let j;
+  try {
+    const res = await fetch(url, { signal: ctl.signal });
+    if (!res.ok) throw new Error('air api ' + res.status);
+    j = await res.json();
+  } catch (e) {
+    if (ctl !== airAbort) return; // superseded: a newer request owns the UI now
+    throw e;
+  }
+  if (ctl !== airAbort) return;
   const hours = [];
   const now = Date.now();
   for (let i = 0; i < j.hourly.time.length; i++) {
@@ -178,15 +190,24 @@ let searchTimer = null;
 $('city-search').addEventListener('input', (e) => {
   clearTimeout(searchTimer);
   const q = e.target.value.trim();
-  if (q.length < 3) { hideResults(); return; }
+  if (q.length < 3) {
+    if (searchAbort) searchAbort.abort(); // cleared input: drop any pending lookup
+    hideResults();
+    return;
+  }
   searchTimer = setTimeout(() => searchCity(q), 350);
 });
 $('city-search').addEventListener('keydown', (e) => { if (e.key === 'Escape') hideResults(); });
 
+let searchAbort = null;
+
 async function searchCity(q) {
+  if (searchAbort) searchAbort.abort(); // drop the older, now-stale lookup
+  const ctl = searchAbort = new AbortController();
   try {
-    const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=en&format=json`);
+    const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=en&format=json`, { signal: ctl.signal });
     const j = await res.json();
+    if (ctl !== searchAbort) return;
     const box = $('search-results');
     box.innerHTML = '';
     if (!j.results) { hideResults(); return; }
@@ -205,7 +226,7 @@ async function searchCity(q) {
     }
     box.style.display = 'block';
     $('city-search').setAttribute('aria-expanded', 'true');
-  } catch { hideResults(); }
+  } catch (e) { if (ctl === searchAbort) hideResults(); }
 }
 
 function hideResults() {
@@ -477,13 +498,19 @@ $('logo').addEventListener('click', () => {
 
 function toggleMotes() {
   const cv = $('egg-canvas');
-  if (cv.dataset.on) { cv.dataset.on = ''; cv.style.display = 'none'; return; }
+  if (cv.dataset.on) {
+    cv.dataset.on = '';
+    cv.style.display = 'none';
+    removeEventListener('resize', cv._resize);
+    return;
+  }
   cv.dataset.on = '1';
   cv.style.display = 'block';
   const ctx = cv.getContext('2d');
   const resize = () => { cv.width = innerWidth; cv.height = innerHeight; };
   resize();
   addEventListener('resize', resize);
+  cv._resize = resize;
   const motes = Array.from({ length: 40 }, () => ({
     x: Math.random() * innerWidth, y: Math.random() * innerHeight,
     r: 1 + Math.random() * 2.4, vy: 0.15 + Math.random() * 0.4, vx: (Math.random() - .5) * 0.25,
@@ -523,7 +550,8 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 async function refresh() {
   try { await fetchAir(); }
-  catch {
+  catch (e) {
+    if (e.name === 'AbortError') return; // superseded by a newer request
     $('aqi-advice').textContent = 'Could not load the air quality forecast. Check your connection and try again.';
   }
 }
@@ -532,4 +560,10 @@ renderSuggestions();
 addMsg('bot', "Hi! I'm your air-quality assistant. I can see today's forecast for your area once it loads - ask me when to go out, how to commute cleaner, or how to keep indoor air safe tonight.");
 probeAI();
 refresh();
-addEventListener('resize', () => state.air && drawChart(state.air.hours));
+// Redraw the chart at most once per frame while the window is being resized.
+let resizeQueued = false;
+addEventListener('resize', () => {
+  if (resizeQueued || !state.air) return;
+  resizeQueued = true;
+  requestAnimationFrame(() => { resizeQueued = false; drawChart(state.air.hours); });
+});
