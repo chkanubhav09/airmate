@@ -250,3 +250,11 @@ test('oversized streamed body is cancelled early instead of fully buffered', asy
   assert.equal(res.status, 413);
   assert.ok(pulled < 20, `read ${pulled} chunks; expected an early stop`);
 });
+
+test('Gemini request disables thinking and leaves room for JSON replies', async () => {
+  stubFetch(() => geminiOk('ok'));
+  await worker.fetch(aiRequest(chatBody), env);
+  const sent = JSON.parse(calls[0].init.body);
+  assert.equal(sent.generationConfig.thinkingConfig.thinkingBudget, 0);
+  assert.ok(sent.generationConfig.maxOutputTokens >= 1024);
+});
