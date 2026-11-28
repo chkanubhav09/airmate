@@ -36,7 +36,10 @@ export async function runModel(env, system, user) {
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: 'user', parts: [{ text: user }] }],
-          generationConfig: { maxOutputTokens: 700, temperature: 0.6 },
+          // maxOutputTokens counts thinking tokens on 2.5 models, so dynamic thinking
+          // can use the whole budget and leave an empty or cut-off JSON reply.
+          // thinkingBudget 0 turns thinking off for this short-answer assistant.
+          generationConfig: { maxOutputTokens: 1024, temperature: 0.6, thinkingConfig: { thinkingBudget: 0 } },
         }),
       }
     );
